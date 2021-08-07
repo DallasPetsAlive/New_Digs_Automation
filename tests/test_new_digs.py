@@ -1,7 +1,7 @@
 import logging
 from datetime import date
 from new_digs_automation.config import base
-from new_digs_automation.new_digs_automation import (
+from new_digs_automation.automation import (
     get_available_pets_to_update,
     update_available_pets,
 )

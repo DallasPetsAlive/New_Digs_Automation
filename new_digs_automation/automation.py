@@ -16,11 +16,10 @@ possible_pet_statuses = [
     "Removed from Program"
 ]
 base_url = "https://api.airtable.com/v0/" + base
-today = date.today()
 headers = {"Authorization": "Bearer " + api_key}
 
 
-def lambda_handler(event, context):
+def automations():
     url = base_url + "/Pets"
 
     response = requests.get(url, headers=headers)
@@ -35,11 +34,20 @@ def lambda_handler(event, context):
     airtable_response = response.json()
 
     # first get pets that are available but don't have an available date
-    available_pets_to_udpate = get_available_pets_to_update(
+    available_pets_to_update = get_available_pets_to_update(
         airtable_response["records"]
     )
-    if not update_available_pets(available_pets_to_udpate):
-        logger.error("Updating pets failed.")
+    available_pets_updated = 0
+    if available_pets_to_update:
+        available_pets_updated = update_available_pets(
+            available_pets_to_update
+        )
+        if not available_pets_updated:
+            logger.error("Updating pets failed.")
+
+    return {
+        "available_pets_updated": available_pets_updated
+    }
 
 
 def get_available_pets_to_update(pets):
@@ -84,6 +92,7 @@ def get_available_pets_to_update(pets):
 
 
 def update_available_pets(pet_ids):
+    today = date.today()
     update_records = []
     for id in pet_ids:
         record = {
@@ -127,7 +136,7 @@ def update_available_pets(pet_ids):
                 logger.error("Patch returned the wrong date.")
                 logger.error(response.content)
                 return False
-        return True
+    return len(update_records)
 
 
 # logging.basicConfig(filename="log.log", level=logging.DEBUG)
