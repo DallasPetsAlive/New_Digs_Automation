@@ -3,6 +3,7 @@ import logging
 import requests
 
 from .config import api_key, base
+from .google_sheets import google_sheets_synchronization
 from datetime import date
 
 logger = logging.getLogger()
@@ -45,8 +46,11 @@ def automations():
         if not available_pets_updated:
             logger.error("Updating pets failed.")
 
+    sheets_rows = google_sheets_synchronization()
+
     return {
-        "available_pets_updated": available_pets_updated
+        "available_pets_updated": available_pets_updated,
+        "google_sheets_rows_written": sheets_rows,
     }
 
 
