@@ -28,6 +28,7 @@ def google_sheets_synchronization():
     total_rows += sync_sheet(sheets, adoption_app_file_key, "/Adoption%20Applicants")
     total_rows += sync_sheet(sheets, participant_app_file_key, "/Participant%20Applicants")
     total_rows += sync_sheet(sheets, original_owners_file_key, "/Original%20Owners")
+    return total_rows
 
 
 def sync_sheet(sheets, file_key, table_name):
@@ -71,8 +72,10 @@ def sync_sheet(sheets, file_key, table_name):
 
     # get field list
     field_list = []
-    for field in table_data[0]:
-        field_list.append(field)
+    for record in table_data:
+        for field in record:
+            field_list.append(field)
+    field_list = sorted(list(set(field_list)))
 
     # the output data for google sheets should be a list of lists
     output_data = []
@@ -82,7 +85,7 @@ def sync_sheet(sheets, file_key, table_name):
     for record in table_data:
         record_data = []
         for field in field_list:
-            record_data.append(record[field])
+            record_data.append(record.get(field, ""))
         output_data.append(record_data)
 
     logger.info(f"writing out {len(output_data)} rows for {table_name}")
