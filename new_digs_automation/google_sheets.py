@@ -53,6 +53,7 @@ def sync_sheet(sheets, file_key, table_name):
     if not records:
         logger.info(f"No records found for table {table_name}")
         return 0
+    number_of_records = len(records)
 
     # sort the data into a list of dicts
     table_data = []
@@ -88,9 +89,15 @@ def sync_sheet(sheets, file_key, table_name):
             record_data.append(record.get(field, ""))
         output_data.append(record_data)
 
-    logger.info(f"writing out {len(output_data)} rows for {table_name}")
+    output_rows_len = len(output_data)
+
+    logger.info(f"writing out {output_rows_len} rows for {table_name}")
+    if number_of_records + 1 != output_rows_len:
+        logger.error("Number of records/rows mismatch")
+        logger.error(f"Expected {number_of_records} + 1 rows")
+        return 0
 
     # finally write it all out to sheets
     sheet.update("A1", output_data)
 
-    return len(output_data)
+    return output_rows_len
