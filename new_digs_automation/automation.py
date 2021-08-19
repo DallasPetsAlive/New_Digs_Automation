@@ -3,7 +3,7 @@ import logging
 import requests
 import urllib.parse
 
-from .config import api_key, base
+from .config import api_key, base, rebrandly_domain_key, rebrandly_api_key
 from .google_sheets import google_sheets_synchronization
 from datetime import date
 
@@ -188,6 +188,7 @@ def add_adoption_contracts(records, pets, owners):
         ):
             pet_name = None
             pet_id = None
+            is_dog = False
             current_owner_name = None
             current_owner_id = None
             if (
@@ -209,6 +210,11 @@ def add_adoption_contracts(records, pets, owners):
                         ):
                             pet_id = pet_fields["Pet ID - do not edit"]
                         if (
+                            "Pet Species" in pet_fields
+                            and pet_fields["Pet Species"]
+                        ):
+                            is_dog = pet_fields["Pet Species"] == "Dog"
+                        if (
                             "Original Owner" in pet_fields
                             and pet_fields["Original Owner"]
                         ):
@@ -228,7 +234,8 @@ def add_adoption_contracts(records, pets, owners):
                 app,
                 pet_name,
                 pet_id,
-                current_owner_name
+                current_owner_name,
+                is_dog,
             )
             record = {
                 "id": app["id"],
@@ -267,8 +274,10 @@ def add_adoption_contracts(records, pets, owners):
     return len(update_records)
 
 
-def get_adoption_app_link(app, pet_name, pet_id, owner_name):
+def get_adoption_app_link(app, pet_name, pet_id, owner_name, dog):
     link = "https://dallaspetsalive.org/new-digs-canine-adoption-contract/?"
+    if not dog:
+        link = "https://dallaspetsalive.org/new-digs-feline-adoption-contract/?"
     params = {}
     if pet_name:
         params["petName"] = pet_name
@@ -298,13 +307,13 @@ def get_adoption_app_link(app, pet_name, pet_id, owner_name):
     linkRequest = {
         "destination": link,
         "domain": {
-            "id": "5e50a8a5d040405c85d8957f23154fc7"
+            "id": rebrandly_domain_key
         },
     }
 
     requestHeaders = {
         "Content-type": "application/json",
-        "apikey": "b92410b92f214eccb8dec17b66dcaadb",
+        "apikey": rebrandly_api_key,
     }
 
     r = requests.post(
@@ -315,8 +324,7 @@ def get_adoption_app_link(app, pet_name, pet_id, owner_name):
 
     if (r.status_code == requests.codes.ok):
         link = r.json()
-        print(link)
-        print("Long URL was %s, short URL is %s" % (link["destination"], link["shortUrl"]))
+        logger.info("Long URL was %s, short URL is %s" % (link["destination"], link["shortUrl"]))
         return link["shortUrl"]
     return None
 
