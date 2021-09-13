@@ -191,6 +191,7 @@ def add_adoption_contracts(records, pets, owners):
             is_dog = False
             current_owner_name = None
             current_owner_id = None
+            current_owner_email = None
             if (
                 "Applied For" in app_fields
                 and app_fields["Applied For"]
@@ -229,12 +230,18 @@ def add_adoption_contracts(records, pets, owners):
                             and owner_fields["Name"]
                         ):
                             current_owner_name = owner_fields["Name"]
+                        if (
+                            "Email Address" in owner_fields
+                            and owner_fields["Email Address"]
+                        ):
+                            current_owner_email = owner_fields["Email Address"]
 
             contract_link = get_adoption_app_link(
                 app,
                 pet_name,
                 pet_id,
                 current_owner_name,
+                current_owner_email,
                 is_dog,
             )
             record = {
@@ -274,7 +281,7 @@ def add_adoption_contracts(records, pets, owners):
     return len(update_records)
 
 
-def get_adoption_app_link(app, pet_name, pet_id, owner_name, dog):
+def get_adoption_app_link(app, pet_name, pet_id, owner_name, owner_email, dog):
     link = "https://dallaspetsalive.org/new-digs-canine-adoption-contract/?"
     if not dog:
         link = "https://dallaspetsalive.org/new-digs-feline-adoption-contract/?"
@@ -289,6 +296,8 @@ def get_adoption_app_link(app, pet_name, pet_id, owner_name, dog):
         owner_last_name = owner_name[space:]
         params["input6[firstname-3]"] = owner_first_name
         params["input6[lastname-3]"] = owner_last_name
+    if owner_email:
+        params["ownersEmail"] = owner_email
 
     app_fields = app["fields"]
     if (
