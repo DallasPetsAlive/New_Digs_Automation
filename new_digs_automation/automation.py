@@ -45,7 +45,7 @@ def automations():
             available_pets_to_update
         )
         if not available_pets_updated:
-            logger.error("Updating pets failed.")
+            logger.error("Updating available pets failed.")
 
     # get pets that are adopted without an adopted date
     adopted_pets_to_update = get_adopted_pets_to_update(
@@ -57,7 +57,19 @@ def automations():
             adopted_pets_to_update
         )
         if not adopted_pets_updated:
-            logger.error("Updating pets failed.")
+            logger.error("Updating adopted pets failed.")
+
+    # get pets that are removed without a removed date
+    removed_pets_to_update = get_removed_pets_to_update(
+        airtable_pet_response["records"]
+    )
+    removed_pets_updated = 0
+    if removed_pets_to_update:
+        removed_pets_updated = update_removed_pets(
+            removed_pets_to_update
+        )
+        if not removed_pets_updated:
+            logger.error("Updating removed pets failed.")
 
     url = base_url + "/Adoption%20Applicants"
     response = requests.get(url, headers=headers)
@@ -94,6 +106,7 @@ def automations():
     return {
         "available_pets_updated": available_pets_updated,
         "adopted_pets_updated": adopted_pets_updated,
+        "removed_pets_updated": removed_pets_updated,
         "adoption_contracts_added": contracts_added,
         "google_sheets_rows_written": sheets_rows,
     }
@@ -264,6 +277,90 @@ def update_adopted_pets(pet_ids):
         for record in records:
             if (
                 record["fields"]["Adopted Date"]
+                != str(today)
+            ):
+                logger.error("Patch returned the wrong date.")
+                logger.error(response.content)
+                return False
+    return len(update_records)
+
+
+def get_removed_pets_to_update(pets):
+    pets_to_update = []
+    for pet in pets:
+        pet_fields = pet["fields"]
+
+        # make sure there's no funny business
+        if (
+            "Status" in pet_fields
+            and pet_fields["Status"] not in possible_pet_statuses
+            and len(pet_fields["Status"]) > 0
+        ):
+            error_status = pet_fields["Status"]
+            id = pet["id"]
+            logger.warning(f"Unknown pet status: {error_status} id: {id}")
+            continue
+        if (
+            "Status" not in pet_fields
+            or pet_fields["Status"] == ""
+        ):
+            id = pet["id"]
+            logger.warning(f"Empty/missing pet status id: {id}")
+            continue
+
+        # check if pet is removed and removed date has not been set
+        if (
+            "Status" in pet_fields
+            and pet_fields["Status"] == "Removed from Program"
+            and (
+                "Removed from Program Date" not in pet_fields
+                or not pet_fields["Removed from Program Date"]
+            )
+        ):
+            pets_to_update.append(pet["id"])
+    return pets_to_update
+
+
+def update_removed_pets(pet_ids):
+    today = date.today()
+    update_records = []
+    for id in pet_ids:
+        record = {
+            "id": id,
+            "fields": {
+                "Removed from Program Date": today,
+            }
+        }
+        update_records.append(record)
+
+    if len(update_records) > 0:
+        payload = {
+            "records": update_records
+        }
+        payload = json.dumps(payload, indent=4, default=str)
+        logger.info(payload)
+        url = base_url + "/Pets"
+        patch_headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + api_key
+        }
+
+        response = requests.patch(url, headers=patch_headers, data=payload)
+        logger.info(response.text)
+        if(response.status_code != requests.codes.ok):
+            logger.error("Patch failed.")
+            logger.error(response.content)
+            return False
+
+        airtable_response = response.json()
+        records = airtable_response["records"]
+        if len(records) != len(update_records):
+            logger.error("Patch returned the wrong number of records.")
+            logger.error(response.content)
+            return False
+        for record in records:
+            if (
+                record["fields"]["Removed Date"]
                 != str(today)
             ):
                 logger.error("Patch returned the wrong date.")
