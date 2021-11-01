@@ -360,7 +360,7 @@ def update_removed_pets(pet_ids):
             return False
         for record in records:
             if (
-                record["fields"]["Removed Date"]
+                record["fields"]["Removed from Program Date"]
                 != str(today)
             ):
                 logger.error("Patch returned the wrong date.")
