@@ -93,6 +93,7 @@ def automations():
 
     return {
         "available_pets_updated": available_pets_updated,
+        "adopted_pets_updated": adopted_pets_updated,
         "adoption_contracts_added": contracts_added,
         "google_sheets_rows_written": sheets_rows,
     }
