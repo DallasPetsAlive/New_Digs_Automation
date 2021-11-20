@@ -1,11 +1,15 @@
+import boto3
 import json
 import logging
+import os
 import requests
 import urllib.parse
 
+from botocore.exceptions import ClientError
 from .config import api_key, base, rebrandly_domain_key, rebrandly_api_key
 from .google_sheets import google_sheets_synchronization
 from datetime import date
+from PIL import Image
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -102,6 +106,19 @@ def automations():
     )
 
     sheets_rows = google_sheets_synchronization()
+    # update thumbnails for pets that don't have one
+    thumbnails_to_update = get_thumbnails_to_update(
+        airtable_pet_response["records"]
+    )
+    thumbnails_updated = 0
+    if thumbnails_to_update:
+        thumbnails_updated = update_thumbnails(
+            airtable_pet_response["records"],
+            thumbnails_to_update,
+        )
+        if not thumbnails_updated:
+            logger.error("Updating thumbnails failed.")
+
 
     return {
         "available_pets_updated": available_pets_updated,
@@ -109,6 +126,7 @@ def automations():
         "removed_pets_updated": removed_pets_updated,
         "adoption_contracts_added": contracts_added,
         "google_sheets_rows_written": sheets_rows,
+        "thumbnails_updated": thumbnails_updated,
     }
 
 
@@ -530,6 +548,133 @@ def get_adoption_app_link(app, pet_name, pet_id, owner_name, owner_email, dog):
         logger.info("Long URL was %s, short URL is %s" % (link["destination"], link["shortUrl"]))
         return link["shortUrl"]
     return None
+
+
+def get_thumbnails_to_update(pets):
+    pets_to_update = []
+    for pet in pets:
+        pet_fields = pet["fields"]
+
+        # check if pet has images but no thumbnail
+        if (
+            "Pictures" in pet_fields
+            and pet_fields["Pictures"]
+            and (
+                "ThumbnailURL" not in pet_fields
+                or not pet_fields["ThumbnailURL"]
+            )
+        ):
+            pets_to_update.append(pet["id"])
+    return pets_to_update
+
+
+def update_thumbnails(pets, pet_ids):
+    update_records = []
+
+    for pet in pets:
+        if pet["id"] in pet_ids:
+            # get the first image
+            pet_fields = pet["fields"]
+            if (
+                "Pictures" in pet_fields
+                and pet_fields["Pictures"]
+            ):
+                url = pet_fields["Pictures"][0]["url"]
+                filename = pet_fields["Pictures"][0]["filename"]
+                thumbnail_file = thumbnail_image(url, filename)
+                thumbnail_url = upload_image(thumbnail_file)
+
+                record = {
+                    "id": pet["id"],
+                    "fields": {
+                        "ThumbnailURL": thumbnail_url,
+                    }
+                }
+                update_records.append(record)
+
+    if len(update_records) > 0:
+        payload = {
+            "records": update_records
+        }
+        payload = json.dumps(payload, indent=4, default=str)
+        logger.info(payload)
+        url = base_url + "/Pets"
+        patch_headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + api_key
+        }
+
+        response = requests.patch(url, headers=patch_headers, data=payload)
+        logger.info(response.text)
+        if(response.status_code != requests.codes.ok):
+            logger.error("Patch failed.")
+            logger.error(response.content)
+            return False
+
+        airtable_response = response.json()
+        records = airtable_response["records"]
+        if len(records) != len(update_records):
+            logger.error("Patch returned the wrong number of records.")
+            logger.error(response.content)
+            return False
+        for record in records:
+            if (
+                not record["fields"].get("ThumbnailURL")
+            ):
+                logger.error("Upload seemed to fail.")
+                logger.error(response.content)
+                return False
+    return len(update_records)
+
+
+def thumbnail_image(url, filename):
+    r = requests.get(url)
+    with open(filename, 'wb') as fp:
+        fp.write(r.content)
+    with Image.open(filename) as img:
+        width, height = img.size
+
+        if height < width:
+            # make square by cutting off equal amounts left and right
+            left = (width - height) / 2
+            right = (width + height) / 2
+            top = 0
+            bottom = height
+            img = img.crop((left, top, right, bottom))
+
+        elif width < height:
+            # make square by cutting off bottom
+            left = 0
+            right = width
+            top = 0
+            bottom = width
+            img = img.crop((left, top, right, bottom))
+
+        if width > 160 and height > 160:
+            img.thumbnail((160, 160))
+
+        img.save(filename)
+
+    return filename
+
+
+def upload_image(filename):
+    s3 = boto3.client('s3')
+
+    # Upload the file
+    try:
+        s3.upload_file(
+            filename,
+            "dpa-media",
+            "new-digs-thumbnails/" + filename,
+            ExtraArgs={'ACL': 'public-read'},
+        )
+    except ClientError as e:
+        logging.error(e)
+
+    os.remove(filename)
+
+    return "https://dpa-media.s3.us-east-2.amazonaws.com/new-digs-thumbnails/" + filename
 
 
 # logging.basicConfig(filename="log.log", level=logging.DEBUG)
