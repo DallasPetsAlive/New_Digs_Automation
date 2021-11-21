@@ -1,7 +1,6 @@
 import boto3
 import json
 import logging
-import os
 import requests
 import urllib.parse
 
@@ -629,9 +628,9 @@ def update_thumbnails(pets, pet_ids):
 
 def thumbnail_image(url, filename):
     r = requests.get(url)
-    with open(filename, 'wb') as fp:
+    with open('/tmp/' + filename, 'wb') as fp:
         fp.write(r.content)
-    with Image.open(filename) as img:
+    with Image.open('/tmp/' + filename) as img:
         width, height = img.size
 
         if height < width:
@@ -653,7 +652,7 @@ def thumbnail_image(url, filename):
         if width > 160 and height > 160:
             img.thumbnail((160, 160))
 
-        img.save(filename)
+        img.save('/tmp/' + filename)
 
     return filename
 
@@ -664,15 +663,13 @@ def upload_image(filename):
     # Upload the file
     try:
         s3.upload_file(
-            filename,
+            '/tmp/' + filename,
             "dpa-media",
             "new-digs-thumbnails/" + filename,
             ExtraArgs={'ACL': 'public-read'},
         )
     except ClientError as e:
         logging.error(e)
-
-    os.remove(filename)
 
     return "https://dpa-media.s3.us-east-2.amazonaws.com/new-digs-thumbnails/" + filename
 
