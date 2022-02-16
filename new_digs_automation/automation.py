@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError
 from .config import api_key, base, rebrandly_domain_key, rebrandly_api_key
 from .google_sheets import google_sheets_synchronization
 from datetime import date
-from PIL import Image
+from PIL import Image, ImageOps
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -117,7 +117,6 @@ def automations():
         )
         if not thumbnails_updated:
             logger.error("Updating thumbnails failed.")
-
 
     return {
         "available_pets_updated": available_pets_updated,
@@ -631,6 +630,7 @@ def thumbnail_image(url, filename):
     with open('/tmp/' + filename, 'wb') as fp:
         fp.write(r.content)
     with Image.open('/tmp/' + filename) as img:
+        img = ImageOps.exif_transpose(img)
         width, height = img.size
 
         if height < width:
