@@ -399,6 +399,7 @@ def add_adoption_contracts(records, pets, owners):
             pet_name = None
             pet_id = None
             is_dog = False
+            disclaimer = None
             current_owner_name = None
             current_owner_id = None
             current_owner_email = None
@@ -430,6 +431,11 @@ def add_adoption_contracts(records, pets, owners):
                             and pet_fields["Original Owner"]
                         ):
                             current_owner_id = pet_fields["Original Owner"][0]
+                        if (
+                            "Disclaimers" in pet_fields
+                            and pet_fields["Disclaimers"]
+                        ):
+                            disclaimer = pet_fields["Disclaimers"]
                         break
 
                 for owner in owners:
@@ -453,6 +459,7 @@ def add_adoption_contracts(records, pets, owners):
                 current_owner_name,
                 current_owner_email,
                 is_dog,
+                disclaimer,
             )
             record = {
                 "id": app["id"],
@@ -491,7 +498,7 @@ def add_adoption_contracts(records, pets, owners):
     return len(update_records)
 
 
-def get_adoption_app_link(app, pet_name, pet_id, owner_name, owner_email, dog):
+def get_adoption_app_link(app, pet_name, pet_id, owner_name, owner_email, dog, disclaimer):
     link = "https://dallaspetsalive.org/new-digs-canine-adoption-contract/?"
     if not dog:
         link = "https://dallaspetsalive.org/new-digs-feline-adoption-contract/?"
@@ -508,6 +515,8 @@ def get_adoption_app_link(app, pet_name, pet_id, owner_name, owner_email, dog):
         params["input6[lastname-3]"] = owner_last_name
     if owner_email:
         params["ownersEmail"] = owner_email
+    if disclaimer:
+        params["petSpecific"] = disclaimer
 
     app_fields = app["fields"]
     if (
@@ -521,7 +530,7 @@ def get_adoption_app_link(app, pet_name, pet_id, owner_name, owner_email, dog):
         params["input6[firstname-4]"] = app_first_name
         params["input6[lastname-4]"] = app_last_name
 
-    link += urllib.parse.urlencode(params)
+    link += urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
 
     linkRequest = {
         "destination": link,
