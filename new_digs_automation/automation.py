@@ -27,6 +27,36 @@ headers = {"Authorization": "Bearer " + api_key}
 def automations():
     url = base_url + "/Pets"
 
+    quit = False
+    pets = []
+    offset = None
+
+    while not quit:
+        
+        params = {}
+
+        if offset:
+            params = {
+                "offset": offset,
+            }
+
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != requests.codes.ok:
+            logger.error("Airtable response: ")
+            logger.error(response)
+            logger.error("URL: %s", url)
+            logger.error("Headers: %s", str(headers))
+            raise Exception
+    
+        airtable_response = response.json()
+        
+        if not airtable_response.get("offset"):
+            quit = True
+        else:
+            offset = airtable_response["offset"]
+        
+        pets += airtable_response["records"]
+
     response = requests.get(url, headers=headers)
     logger.info(json.dumps(json.loads(response.text)))
     if(response.status_code != requests.codes.ok):
@@ -36,12 +66,8 @@ def automations():
         logger.error("Headers: " + str(headers))
         return
 
-    airtable_pet_response = response.json()
-
     # first get pets that are available but don't have an available date
-    available_pets_to_update = get_available_pets_to_update(
-        airtable_pet_response["records"]
-    )
+    available_pets_to_update = get_available_pets_to_update(pets)
     available_pets_updated = 0
     if available_pets_to_update:
         available_pets_updated = update_available_pets(
@@ -51,9 +77,7 @@ def automations():
             logger.error("Updating available pets failed.")
 
     # get pets that are adopted without an adopted date
-    adopted_pets_to_update = get_adopted_pets_to_update(
-        airtable_pet_response["records"]
-    )
+    adopted_pets_to_update = get_adopted_pets_to_update(pets)
     adopted_pets_updated = 0
     if adopted_pets_to_update:
         adopted_pets_updated = update_adopted_pets(
@@ -63,9 +87,7 @@ def automations():
             logger.error("Updating adopted pets failed.")
 
     # get pets that are removed without a removed date
-    removed_pets_to_update = get_removed_pets_to_update(
-        airtable_pet_response["records"]
-    )
+    removed_pets_to_update = get_removed_pets_to_update(pets)
     removed_pets_updated = 0
     if removed_pets_to_update:
         removed_pets_updated = update_removed_pets(
@@ -100,19 +122,18 @@ def automations():
 
     contracts_added = add_adoption_contracts(
         airtable_adopt_response["records"],
-        airtable_pet_response["records"],
+        pets,
         airtable_owners_response["records"],
     )
 
-    sheets_rows = google_sheets_synchronization()
+    # sheets_rows = google_sheets_synchronization()
+    sheets_rows = 0
     # update thumbnails for pets that don't have one
-    thumbnails_to_update = get_thumbnails_to_update(
-        airtable_pet_response["records"]
-    )
+    thumbnails_to_update = get_thumbnails_to_update(pets)
     thumbnails_updated = 0
     if thumbnails_to_update:
         thumbnails_updated = update_thumbnails(
-            airtable_pet_response["records"],
+            pets,
             thumbnails_to_update,
         )
         if not thumbnails_updated:
@@ -470,38 +491,39 @@ def add_adoption_contracts(records, pets, owners):
             update_records.append(record)
 
     if len(update_records) > 0:
-        payload = {
-            "records": update_records
-        }
-        payload = json.dumps(payload, indent=4, default=str)
-        logger.info(payload)
-        url = base_url + "/Adoption%20Applicants"
-        patch_headers = {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + api_key
-        }
-
-        response = requests.patch(url, headers=patch_headers, data=payload)
-        logger.info(response.text)
-        if(response.status_code != requests.codes.ok):
-            logger.error("Patch failed.")
-            logger.error(response.content)
-            return False
-
-        airtable_response = response.json()
-        records = airtable_response["records"]
-        if len(records) != len(update_records):
-            logger.error("Patch returned the wrong number of records.")
-            logger.error(response.content)
-            return False
+        for i in range(0, len(update_records), 10):
+            payload = {
+                "records": update_records[i:i+10]
+            }
+            payload = json.dumps(payload, indent=4, default=str)
+            logger.info(payload)
+            url = base_url + "/Adoption%20Applicants"
+            patch_headers = {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + api_key
+            }
+    
+            response = requests.patch(url, headers=patch_headers, data=payload)
+            logger.info(response.text)
+            if(response.status_code != requests.codes.ok):
+                logger.error("Patch failed.")
+                logger.error(response.content)
+                return False
+    
+            airtable_response = response.json()
+            records = airtable_response["records"]
+            if len(records) != 10:
+                logger.error("Patch returned the wrong number of records.")
+                logger.error(response.content)
+                return False
 
     return len(update_records)
 
 
 def get_adoption_app_link(app, pet_name, pet_id, owner_name, owner_email, dog, disclaimer):
-    link = "https://dallaspetsalive.org/new-digs-canine-adoption-contract/?"
+    link = "https://form.jotform.com/212055719626154?"
     if not dog:
-        link = "https://dallaspetsalive.org/new-digs-feline-adoption-contract/?"
+        link = "https://form.jotform.com/212054429850049?"
     params = {}
     if pet_name:
         params["petName"] = pet_name
@@ -636,6 +658,7 @@ def update_thumbnails(pets, pet_ids):
 
 def thumbnail_image(url, filename):
     r = requests.get(url)
+    logger.info(filename)
     with open('/tmp/' + filename, 'wb') as fp:
         fp.write(r.content)
     with Image.open('/tmp/' + filename) as img:
