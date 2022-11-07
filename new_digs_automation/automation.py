@@ -97,33 +97,73 @@ def automations():
             logger.error("Updating removed pets failed.")
 
     url = base_url + "/Adoption%20Applicants"
-    response = requests.get(url, headers=headers)
-    logger.info(json.dumps(json.loads(response.text)))
-    if(response.status_code != requests.codes.ok):
-        logger.error("Airtable response Adopt apps: ")
-        logger.error(response)
-        logger.error("URL: " + url)
-        logger.error("Headers: " + str(headers))
-        return
 
-    airtable_adopt_response = response.json()
+    quit = False
+    adopt_apps = []
+    offset = None
+
+    while not quit:
+        
+        params = {}
+
+        if offset:
+            params = {
+                "offset": offset,
+            }
+
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != requests.codes.ok:
+            logger.error("Airtable response: ")
+            logger.error(response)
+            logger.error("URL: %s", url)
+            logger.error("Headers: %s", str(headers))
+            raise Exception
+    
+        airtable_response = response.json()
+        
+        if not airtable_response.get("offset"):
+            quit = True
+        else:
+            offset = airtable_response["offset"]
+        
+        adopt_apps += airtable_response["records"]
 
     url = base_url + "/Original%20Owners"
-    response = requests.get(url, headers=headers)
-    logger.info(json.dumps(json.loads(response.text)))
-    if(response.status_code != requests.codes.ok):
-        logger.error("Airtable response Adopt apps: ")
-        logger.error(response)
-        logger.error("URL: " + url)
-        logger.error("Headers: " + str(headers))
-        return
 
-    airtable_owners_response = response.json()
+    quit = False
+    owners = []
+    offset = None
+
+    while not quit:
+        
+        params = {}
+
+        if offset:
+            params = {
+                "offset": offset,
+            }
+
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != requests.codes.ok:
+            logger.error("Airtable response: ")
+            logger.error(response)
+            logger.error("URL: %s", url)
+            logger.error("Headers: %s", str(headers))
+            raise Exception
+    
+        airtable_response = response.json()
+        
+        if not airtable_response.get("offset"):
+            quit = True
+        else:
+            offset = airtable_response["offset"]
+        
+        owners += airtable_response["records"]
 
     contracts_added = add_adoption_contracts(
-        airtable_adopt_response["records"],
+        adopt_apps,
         pets,
-        airtable_owners_response["records"],
+        owners,
     )
 
     # sheets_rows = google_sheets_synchronization()
