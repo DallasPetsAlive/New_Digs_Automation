@@ -1,6 +1,7 @@
 import boto3
 import json
 import logging
+import os
 import requests
 import urllib.parse
 
@@ -56,15 +57,6 @@ def automations():
             offset = airtable_response["offset"]
         
         pets += airtable_response["records"]
-
-    response = requests.get(url, headers=headers)
-    logger.info(json.dumps(json.loads(response.text)))
-    if(response.status_code != requests.codes.ok):
-        logger.error("Airtable response Pets: ")
-        logger.error(response)
-        logger.error("URL: " + url)
-        logger.error("Headers: " + str(headers))
-        return
 
     # first get pets that are available but don't have an available date
     available_pets_to_update = get_available_pets_to_update(pets)
@@ -179,6 +171,10 @@ def automations():
         if not thumbnails_updated:
             logger.error("Updating thumbnails failed.")
 
+    # move photos to s3
+    photos_in_s3 = get_photos()
+    photos_uploaded = upload_photos(photos_in_s3, pets)
+
     return {
         "available_pets_updated": available_pets_updated,
         "adopted_pets_updated": adopted_pets_updated,
@@ -186,6 +182,7 @@ def automations():
         "adoption_contracts_added": contracts_added,
         "google_sheets_rows_written": sheets_rows,
         "thumbnails_updated": thumbnails_updated,
+        "photos_uploaded": photos_uploaded,
     }
 
 
@@ -651,7 +648,8 @@ def update_thumbnails(pets, pet_ids):
                 url = pet_fields["Pictures"][0]["url"]
                 filename = pet_fields["Pictures"][0]["filename"]
                 thumbnail_file = thumbnail_image(url, filename)
-                thumbnail_url = upload_image(thumbnail_file)
+                thumbnail_url = upload_image(thumbnail_file, "new-digs-thumbnails/")
+                os.remove("/tmp/" + thumbnail_file)
 
                 record = {
                     "id": pet["id"],
@@ -729,15 +727,17 @@ def thumbnail_image(url, filename):
     return filename
 
 
-def upload_image(filename):
+def upload_image(filename, path):
+    logger.info(f"uploading {path}/{filename}")
+
     s3 = boto3.client('s3')
 
     # Upload the file
     try:
         s3.upload_file(
-            '/tmp/' + filename,
+            "/tmp/" + filename,
             "dpa-media",
-            "new-digs-thumbnails/" + filename,
+            path + filename,
             ExtraArgs={'ACL': 'public-read'},
         )
     except ClientError as e:
@@ -745,6 +745,57 @@ def upload_image(filename):
 
     return "https://dpa-media.s3.us-east-2.amazonaws.com/new-digs-thumbnails/" + filename
 
+
+def get_photos():
+    # get the current photos
+
+    s3 = boto3.client('s3')
+
+    photos = []
+
+    try:
+        done = False
+        while not done:
+            response = s3.list_objects_v2(
+                Bucket="dpa-media",
+                Prefix="new-digs-photos/",
+            )
+            
+            if not response.get("isTruncated"):
+                done = True
+            contents = response.get("Contents")
+            for item in contents:
+                photos.append(item.get("Key"))
+    except ClientError as e:
+        logging.error(e)
+
+    return photos
+
+
+def upload_photos(photos_in_s3, pets):
+    photos_to_upload = []
+    for pet in pets:
+        pet_id = pet["id"]
+        pet_fields = pet["fields"]
+        if (
+            "Pictures" in pet_fields
+            and pet_fields["Pictures"]
+        ):
+            for photo in pet_fields["Pictures"]:
+                photo_url = photo["url"]
+                photo_filename = photo["filename"]
+                photo_key = "new-digs-photos/" + pet_id + "/" + photo_filename
+                if photo_key not in photos_in_s3:
+                    photos_to_upload.append((photo_key, photo_url, photo_filename, pet_id))
+
+    for photo_key, photo_url, photo_filename, pet_id in photos_to_upload:
+        r = requests.get(photo_url)
+        with open("/tmp/" + photo_filename, "wb") as fp:
+            fp.write(r.content)
+        upload_image(photo_filename, "new-digs-photos/" + pet_id + "/")
+        os.remove("/tmp/" + photo_filename)
+
+    return len(photos_to_upload)
 
 # logging.basicConfig(filename="log.log", level=logging.DEBUG)
 # update_available_pets(["recOkHgRR68MnYz2k"])
