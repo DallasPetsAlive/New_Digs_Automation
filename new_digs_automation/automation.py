@@ -9,7 +9,7 @@ from botocore.exceptions import ClientError
 from .config import api_key, base, rebrandly_domain_key, rebrandly_api_key
 from .google_sheets import google_sheets_synchronization
 from datetime import date
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -647,17 +647,20 @@ def update_thumbnails(pets, pet_ids):
             ):
                 url = pet_fields["Pictures"][0]["url"]
                 filename = pet_fields["Pictures"][0]["filename"]
+                filename = filename.replace(" ", "_")
+                filename = filename.replace("%20", "_")
                 thumbnail_file = thumbnail_image(url, filename)
-                thumbnail_url = upload_image(thumbnail_file, "new-digs-thumbnails/")
-                os.remove("/tmp/" + thumbnail_file)
+                if thumbnail_file:
+                    thumbnail_url = upload_image(thumbnail_file, "new-digs-thumbnails/")
+                    os.remove("/tmp/" + thumbnail_file)
 
-                record = {
-                    "id": pet["id"],
-                    "fields": {
-                        "ThumbnailURL": thumbnail_url,
+                    record = {
+                        "id": pet["id"],
+                        "fields": {
+                            "ThumbnailURL": thumbnail_url,
+                        }
                     }
-                }
-                update_records.append(record)
+                    update_records.append(record)
 
     if len(update_records) > 0:
         payload = {
@@ -699,30 +702,34 @@ def thumbnail_image(url, filename):
     logger.info(filename)
     with open('/tmp/' + filename, 'wb') as fp:
         fp.write(r.content)
-    with Image.open('/tmp/' + filename) as img:
-        img = ImageOps.exif_transpose(img)
-        width, height = img.size
+    try:
+        with Image.open('/tmp/' + filename) as img:
+            img = ImageOps.exif_transpose(img)
+            width, height = img.size
 
-        if height < width:
-            # make square by cutting off equal amounts left and right
-            left = (width - height) / 2
-            right = (width + height) / 2
-            top = 0
-            bottom = height
-            img = img.crop((left, top, right, bottom))
+            if height < width:
+                # make square by cutting off equal amounts left and right
+                left = (width - height) / 2
+                right = (width + height) / 2
+                top = 0
+                bottom = height
+                img = img.crop((left, top, right, bottom))
 
-        elif width < height:
-            # make square by cutting off bottom
-            left = 0
-            right = width
-            top = 0
-            bottom = width
-            img = img.crop((left, top, right, bottom))
+            elif width < height:
+                # make square by cutting off bottom
+                left = 0
+                right = width
+                top = 0
+                bottom = width
+                img = img.crop((left, top, right, bottom))
 
-        if width > 160 and height > 160:
-            img.thumbnail((160, 160))
+            if width > 160 and height > 160:
+                img.thumbnail((160, 160))
 
-        img.save('/tmp/' + filename)
+            img.save('/tmp/' + filename)
+    except UnidentifiedImageError:
+        logger.error("Could not open image " + filename)
+        return None
 
     return filename
 
@@ -784,6 +791,8 @@ def upload_photos(photos_in_s3, pets):
             for photo in pet_fields["Pictures"]:
                 photo_url = photo["url"]
                 photo_filename = photo["filename"]
+                photo_filename = photo_filename.replace(" ", "_")
+                photo_filename = photo_filename.replace("%20", "_")
                 photo_key = "new-digs-photos/" + pet_id + "/" + photo_filename
                 if photo_key not in photos_in_s3:
                     photos_to_upload.append((photo_key, photo_url, photo_filename, pet_id))
