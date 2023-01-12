@@ -662,9 +662,14 @@ def update_thumbnails(pets, pet_ids):
                     }
                     update_records.append(record)
 
-    if len(update_records) > 0:
+    count = 0
+    while len(update_records) > 0:
+        batch_size = min(10, len(update_records))
+        count += batch_size
+        update_batch = update_records[:batch_size]
+        update_records = update_records[batch_size:]
         payload = {
-            "records": update_records
+            "records": update_batch
         }
         payload = json.dumps(payload, indent=4, default=str)
         logger.info(payload)
@@ -683,7 +688,7 @@ def update_thumbnails(pets, pet_ids):
 
         airtable_response = response.json()
         records = airtable_response["records"]
-        if len(records) != len(update_records):
+        if len(records) != len(update_batch):
             logger.error("Patch returned the wrong number of records.")
             logger.error(response.content)
             return False
@@ -694,7 +699,7 @@ def update_thumbnails(pets, pet_ids):
                 logger.error("Upload seemed to fail.")
                 logger.error(response.content)
                 return False
-    return len(update_records)
+    return count
 
 
 def thumbnail_image(url, filename):
@@ -723,8 +728,8 @@ def thumbnail_image(url, filename):
                 bottom = width
                 img = img.crop((left, top, right, bottom))
 
-            if width > 160 and height > 160:
-                img.thumbnail((160, 160))
+            if width > 400 and height > 400:
+                img.thumbnail((400, 400))
 
             img.save('/tmp/' + filename)
     except UnidentifiedImageError:
