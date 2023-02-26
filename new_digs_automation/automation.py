@@ -766,18 +766,15 @@ def get_photos():
     photos = []
 
     try:
-        done = False
-        while not done:
-            response = s3.list_objects_v2(
-                Bucket="dpa-media",
-                Prefix="new-digs-photos/",
-            )
-            
-            if not response.get("isTruncated"):
-                done = True
-            contents = response.get("Contents")
+        paginator = s3.get_paginator("list_objects_v2")
+        page_iterator = paginator.paginate(Bucket="dpa-media", Prefix="new-digs-photos/")
+        for page in page_iterator:
+            logger.debug("response: %s", page)
+
+            contents = page.get("Contents")
             for item in contents:
                 photos.append(item.get("Key"))
+
     except ClientError as e:
         logging.error(e)
 
@@ -800,6 +797,7 @@ def upload_photos(photos_in_s3, pets):
                 photo_filename = photo_filename.replace("%20", "_")
                 photo_key = "new-digs-photos/" + pet_id + "/" + photo_filename
                 if photo_key not in photos_in_s3:
+                    logger.info(f"going to upload {photo_key}")
                     photos_to_upload.append((photo_key, photo_url, photo_filename, pet_id))
 
     for photo_key, photo_url, photo_filename, pet_id in photos_to_upload:
