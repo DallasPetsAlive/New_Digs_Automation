@@ -7,7 +7,6 @@ import urllib.parse
 
 from botocore.exceptions import ClientError
 from .config import api_key, base, rebrandly_domain_key, rebrandly_api_key
-from .google_sheets import google_sheets_synchronization
 from datetime import date
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -158,6 +157,10 @@ def automations():
         owners,
     )
 
+    links_cleaned_up = cleanup_links(
+        pets,
+    )
+
     # sheets_rows = google_sheets_synchronization()
     sheets_rows = 0
     # update thumbnails for pets that don't have one
@@ -183,6 +186,7 @@ def automations():
         "google_sheets_rows_written": sheets_rows,
         "thumbnails_updated": thumbnails_updated,
         "photos_uploaded": photos_uploaded,
+        "links_cleaned_up": links_cleaned_up,
     }
 
 
@@ -809,5 +813,73 @@ def upload_photos(photos_in_s3, pets):
 
     return len(photos_to_upload)
 
-# logging.basicConfig(filename="log.log", level=logging.DEBUG)
-# update_available_pets(["recOkHgRR68MnYz2k"])
+
+def cleanup_links(pets):
+    active_pet_ids = []
+
+    for pet in pets:
+        if (
+            pet.get("fields", {}).get("Status") not in [
+                "Adopted",
+                "Removed from Program"
+            ]
+        ):
+            active_pet_ids.append(str(pet.get("fields", {}).get("Pet ID - do not edit", "")))
+
+    current_links = []
+
+    requestHeaders = {
+        "Content-type": "application/json",
+        "apikey": rebrandly_api_key,
+    }
+
+    done = False
+    last_link = ""
+    while not done:
+        r = requests.get(
+            "https://api.rebrandly.com/v1/links?limit=20&last={}".format(last_link),
+            headers=requestHeaders
+        )
+
+        if (r.status_code == requests.codes.ok):
+            response = r.json()
+            current_links.extend(response)
+            if not response:
+                done = True
+            else:
+                last_link = response[-1]["id"]
+
+    links_to_delete = []
+    
+    for link in current_links:
+        destination = link.get("destination", "")
+        if "jotform" not in destination:
+            continue
+
+        parsed = urllib.parse.urlparse(destination)
+        params = urllib.parse.parse_qs(parsed.query)
+        parsed_pet_id = params.get("petId")
+        if parsed_pet_id:
+            parsed_pet_id = parsed_pet_id.pop()
+            if parsed_pet_id not in active_pet_ids:
+                links_to_delete.append(link.get("id"))
+
+    batch_to_delete = []
+    for link in links_to_delete:
+        batch_to_delete.append(link)
+        if len(batch_to_delete) == 25:
+            r = requests.delete(
+                "https://api.rebrandly.com/v1/links",
+                headers=requestHeaders,
+                json={"links": batch_to_delete},
+            )
+            batch_to_delete = []
+
+    if batch_to_delete:
+        r = requests.delete(
+            "https://api.rebrandly.com/v1/links",
+            headers=requestHeaders,
+            json={"links": batch_to_delete},
+        )
+
+    return len(links_to_delete)
