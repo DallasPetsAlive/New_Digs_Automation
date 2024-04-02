@@ -157,9 +157,10 @@ def automations():
         owners,
     )
 
-    links_cleaned_up = cleanup_links(
-        pets,
-    )
+    # links_cleaned_up = cleanup_links(
+    #     pets,
+    # )
+    links_cleaned_up = 0
 
     # sheets_rows = google_sheets_synchronization()
     sheets_rows = 0
@@ -642,29 +643,33 @@ def update_thumbnails(pets, pet_ids):
     update_records = []
 
     for pet in pets:
-        if pet["id"] in pet_ids:
-            # get the first image
-            pet_fields = pet["fields"]
-            if (
-                "Pictures" in pet_fields
-                and pet_fields["Pictures"]
-            ):
-                url = pet_fields["Pictures"][0]["url"]
-                filename = pet_fields["Pictures"][0]["filename"]
-                filename = filename.replace(" ", "_")
-                filename = filename.replace("%20", "_")
-                thumbnail_file = thumbnail_image(url, filename)
-                if thumbnail_file:
-                    thumbnail_url = upload_image(thumbnail_file, "new-digs-thumbnails/")
-                    os.remove("/tmp/" + thumbnail_file)
+        try:
+            if pet["id"] in pet_ids:
+                # get the first image
+                pet_fields = pet["fields"]
+                if (
+                    "Pictures" in pet_fields
+                    and pet_fields["Pictures"]
+                ):
+                    logger.info(pet["id"])
+                    url = pet_fields["Pictures"][0]["url"]
+                    filename = pet_fields["Pictures"][0]["filename"]
+                    filename = filename.replace(" ", "_")
+                    filename = filename.replace("%20", "_")
+                    thumbnail_file = thumbnail_image(url, filename)
+                    if thumbnail_file:
+                        thumbnail_url = upload_image(thumbnail_file, "new-digs-thumbnails/")
+                        os.remove("/tmp/" + thumbnail_file)
 
-                    record = {
-                        "id": pet["id"],
-                        "fields": {
-                            "ThumbnailURL": thumbnail_url,
+                        record = {
+                            "id": pet["id"],
+                            "fields": {
+                                "ThumbnailURL": thumbnail_url,
+                            }
                         }
-                    }
-                    update_records.append(record)
+                        update_records.append(record)
+        except Exception:
+            logger.exception(f"Error updating thumbnail for pet {pet['id']}")
 
     count = 0
     while len(update_records) > 0:
@@ -735,6 +740,8 @@ def thumbnail_image(url, filename):
             if width > 400 and height > 400:
                 img.thumbnail((400, 400))
 
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
             img.save('/tmp/' + filename)
     except UnidentifiedImageError:
         logger.error("Could not open image " + filename)
