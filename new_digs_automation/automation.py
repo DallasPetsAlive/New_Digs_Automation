@@ -1,8 +1,11 @@
 import boto3
+import copy
 import json
 import logging
 import os
+import random
 import requests
+import string
 import urllib.parse
 
 from botocore.exceptions import ClientError
@@ -57,7 +60,10 @@ def automations():
         
         pets += airtable_response["records"]
 
-    # first get pets that are available but don't have an available date
+    # rename photos
+    photos_renamed = rename_photos(pets)
+
+    # get pets that are available but don't have an available date
     available_pets_to_update = get_available_pets_to_update(pets)
     available_pets_updated = 0
     if available_pets_to_update:
@@ -188,7 +194,88 @@ def automations():
         "thumbnails_updated": thumbnails_updated,
         "photos_uploaded": photos_uploaded,
         "links_cleaned_up": links_cleaned_up,
+        "photos_renamed": photos_renamed,
     }
+
+
+def rename_photos(pets):
+    photos_renamed = 0
+    records_to_update = []
+
+    for pet in pets:
+        try:
+            pet_fields = pet["fields"]
+            if (
+                "Pictures" in pet_fields
+                and pet_fields["Pictures"]
+            ):
+                photo_name_map_str = pet_fields.get("PictureMap-DoNotModify", "")
+                photo_name_map = {}
+                if photo_name_map_str:
+                    photo_name_map = json.loads(photo_name_map_str)
+
+                renamed = False
+                fields_copy = copy.deepcopy(pet_fields)
+                for photo in fields_copy["Pictures"]:
+                    mapped_name = photo_name_map.get(photo["filename"], "")
+                    _, photo_extension = os.path.splitext(photo["filename"])
+                    if not mapped_name.startswith("nd_"):
+                        new_photo_name = "nd_" + "".join(random.choices(string.ascii_uppercase + string.digits, k=10))
+                        if not photo_extension:
+                            photo_extension = ".jpg"
+                        new_photo_name += photo_extension
+
+                        logger.info(f"renaming {photo['filename']} to {new_photo_name}")
+                        photo_name_map[photo["filename"]] = new_photo_name
+                        photos_renamed += 1
+
+                        renamed = True
+
+                if renamed:
+                    records_to_update.append({
+                        "id": pet["id"],
+                        "fields": {
+                            "PictureMap-DoNotModify": json.dumps(photo_name_map),
+                        },
+                    })
+
+        except Exception:
+            logger.exception(f"Error renaming photos for pet {pet['id']}")
+
+    if records_to_update:
+        send_update(records_to_update)
+
+    return photos_renamed
+
+
+def send_update(records_to_update):
+    try:
+        payload = {
+            "records": records_to_update,
+        }
+        payload = json.dumps(payload, indent=4, default=str)
+        url = base_url + "/Pets"
+        patch_headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + api_key
+        }
+
+        response = requests.patch(url, headers=patch_headers, data=payload)
+        logger.info(response.text)
+        if(response.status_code != requests.codes.ok):
+            logger.error(f"Patch failed status code {response.status_code}")
+            logger.error(response.content)
+            return False
+
+        airtable_response = response.json()
+        records = airtable_response["records"]
+        if len(records) != len(records_to_update):
+            logger.error("Patch returned the wrong number of records.")
+            logger.error(response.content)
+            return False
+    except Exception:
+        logger.exception("Error updating pet records")
+                
 
 
 def get_available_pets_to_update(pets):
@@ -651,9 +738,16 @@ def update_thumbnails(pets, pet_ids):
                     "Pictures" in pet_fields
                     and pet_fields["Pictures"]
                 ):
-                    logger.info(pet["id"])
-                    url = pet_fields["Pictures"][0]["url"]
+                    logger.info(f"updating thumbnail for ID {pet['id']}")
+
+                    filename_map = pet_fields.get("PictureMap-DoNotModify", "")
+                    filename_map = json.loads(filename_map)
+
                     filename = pet_fields["Pictures"][0]["filename"]
+                    if filename in filename_map:
+                        filename = filename_map[filename]
+
+                    url = pet_fields["Pictures"][0]["url"]
                     filename = filename.replace(" ", "_")
                     filename = filename.replace("%20", "_")
                     thumbnail_file = thumbnail_image(url, filename)
@@ -803,7 +897,14 @@ def upload_photos(photos_in_s3, pets):
         ):
             for photo in pet_fields["Pictures"]:
                 photo_url = photo["url"]
+
+                filename_map = pet_fields.get("PictureMap-DoNotModify", "")
+                filename_map = json.loads(filename_map)
+
                 photo_filename = photo["filename"]
+                if photo_filename in filename_map:
+                    photo_filename = filename_map[photo_filename]
+
                 photo_filename = photo_filename.replace(" ", "_")
                 photo_filename = photo_filename.replace("%20", "_")
                 photo_key = "new-digs-photos/" + pet_id + "/" + photo_filename
@@ -813,6 +914,8 @@ def upload_photos(photos_in_s3, pets):
 
     for photo_key, photo_url, photo_filename, pet_id in photos_to_upload:
         r = requests.get(photo_url)
+        logger.info(pet_id)
+        logger.info(photo_filename)
         with open("/tmp/" + photo_filename, "wb") as fp:
             fp.write(r.content)
         upload_image(photo_filename, "new-digs-photos/" + pet_id + "/")
