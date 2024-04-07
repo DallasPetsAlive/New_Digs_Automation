@@ -1,5 +1,6 @@
 import boto3
 import copy
+import datetime
 import json
 import logging
 import os
@@ -15,6 +16,8 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+secrets_client = boto3.client("secretsmanager")
 
 possible_pet_statuses = [
     "Accepted, Not Yet Published",
@@ -59,6 +62,9 @@ def automations():
             offset = airtable_response["offset"]
         
         pets += airtable_response["records"]
+
+    # check for repeat photo names
+    check_photo_names(pets)
 
     # rename photos
     photos_renamed = rename_photos(pets)
@@ -196,6 +202,52 @@ def automations():
         "links_cleaned_up": links_cleaned_up,
         "photos_renamed": photos_renamed,
     }
+
+
+def check_photo_names(pets):
+    # only run this once a day
+    current_hour = datetime.datetime.today().hour
+    if current_hour != 0:
+        return
+
+    pets_with_bad_photos = []
+
+    for pet in pets:
+        try:
+            pet_fields = pet["fields"]
+            if (
+                "Pictures" in pet_fields
+                and pet_fields["Pictures"]
+            ):
+                pictures = pet_fields["Pictures"]
+
+                photo_names = [picture["filename"] for picture in pictures]
+                if len(photo_names) != len(set(photo_names)):
+                    pets_with_bad_photos.append(pet_fields["Pet Name"])
+
+        except Exception:
+            logger.exception(f"Error checking photo names for pet {pet['id']}")
+
+    if pets_with_bad_photos:
+        message = {
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "The following pets have duplicate photo names that must be renamed:\n{}".format("\n".join(pets_with_bad_photos)),
+                    }
+                },
+            ],
+        }
+
+        webhook = json.loads(secrets_client.get_secret_value(SecretId="slack_nd_alerts_webhook")["SecretString"])
+        url = webhook.get("url")
+
+        requests.post(
+            url,
+            json=message,
+        )
 
 
 def rename_photos(pets):
