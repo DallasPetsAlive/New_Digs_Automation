@@ -291,6 +291,8 @@ def rename_photos(pets):
                         },
                     })
 
+                    pet_fields["PictureMap-DoNotModify"] = json.dumps(photo_name_map)
+
         except Exception:
             logger.exception(f"Error renaming photos for pet {pet['id']}")
 
