@@ -1020,6 +1020,9 @@ def cleanup_links(pets):
         if "jotform" not in destination:
             continue
 
+        if "pass-form" in destination:
+            continue
+
         parsed = urllib.parse.urlparse(destination)
         params = urllib.parse.parse_qs(parsed.query)
         parsed_pet_id = params.get("petId")
