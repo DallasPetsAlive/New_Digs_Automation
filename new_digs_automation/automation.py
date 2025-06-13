@@ -229,25 +229,7 @@ def check_photo_names(pets):
             logger.exception(f"Error checking photo names for pet {pet['id']}")
 
     if pets_with_bad_photos:
-        message = {
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "The following pets have duplicate photo names that must be renamed:\n{}".format("\n".join(pets_with_bad_photos)),
-                    }
-                },
-            ],
-        }
-
-        webhook = json.loads(secrets_client.get_secret_value(SecretId="slack_nd_alerts_webhook")["SecretString"])
-        url = webhook.get("url")
-
-        requests.post(
-            url,
-            json=message,
-        )
+        post_to_slack("The following pets have duplicate photo names that must be renamed:\n{}".format("\n".join(pets_with_bad_photos)))
 
 
 def rename_photos(pets):
@@ -303,32 +285,35 @@ def rename_photos(pets):
 
 
 def send_update(records_to_update):
-    try:
-        payload = {
-            "records": records_to_update,
-        }
-        payload = json.dumps(payload, indent=4, default=str)
-        url = base_url + "/Pets"
-        patch_headers = {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + api_key
-        }
+    batchsize = 10
+    for i in range(0, len(records_to_update), batchsize):
+        batch = records_to_update[i:i+batchsize]
+        try:
+            payload = {
+                "records": batch,
+            }
+            payload = json.dumps(payload, indent=4, default=str)
+            url = base_url + "/Pets"
+            patch_headers = {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + api_key
+            }
 
-        response = requests.patch(url, headers=patch_headers, data=payload)
-        logger.info(response.text)
-        if(response.status_code != requests.codes.ok):
-            logger.error(f"Patch failed status code {response.status_code}")
-            logger.error(response.content)
-            return False
+            response = requests.patch(url, headers=patch_headers, data=payload)
+            logger.info(response.text)
+            if(response.status_code != requests.codes.ok):
+                logger.error(f"Patch failed status code {response.status_code}")
+                logger.error(response.content)
+                return False
 
-        airtable_response = response.json()
-        records = airtable_response["records"]
-        if len(records) != len(records_to_update):
-            logger.error("Patch returned the wrong number of records.")
-            logger.error(response.content)
-            return False
-    except Exception:
-        logger.exception("Error updating pet records")
+            airtable_response = response.json()
+            records = airtable_response["records"]
+            if len(records) != len(batch):
+                logger.error("Patch returned the wrong number of records.")
+                logger.error(response.content)
+                return False
+        except Exception:
+            logger.exception("Error updating pet records")
                 
 
 
@@ -804,6 +789,13 @@ def update_thumbnails(pets, pet_ids):
                     url = pet_fields["Pictures"][0]["url"]
                     filename = filename.replace(" ", "_")
                     filename = filename.replace("%20", "_")
+
+                    file_extension = os.path.splitext(filename)[1]
+                    if "pdf" in file_extension.lower():
+                        logger.warning(f"Skipping PDF image {filename}")
+                        post_to_slack(f"Pet {pet['id']} has a PDF image {filename} that needs to be converted.")
+                        continue
+
                     thumbnail_file = thumbnail_image(url, filename)
                     if thumbnail_file:
                         thumbnail_url = upload_image(thumbnail_file, "new-digs-thumbnails/")
@@ -1021,6 +1013,7 @@ def cleanup_links(pets):
             continue
 
         if "pass-form" in destination:
+            logger.info("skipping pass-form link {}".format(destination)) 
             continue
 
         parsed = urllib.parse.urlparse(destination)
@@ -1050,3 +1043,25 @@ def cleanup_links(pets):
         )
 
     return len(links_to_delete)
+
+
+def post_to_slack(message):
+    message = {
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": message,
+                }
+            },
+        ],
+    }
+
+    webhook = json.loads(secrets_client.get_secret_value(SecretId="slack_nd_alerts_webhook")["SecretString"])
+    url = webhook.get("url")
+
+    requests.post(
+        url,
+        json=message,
+    )
